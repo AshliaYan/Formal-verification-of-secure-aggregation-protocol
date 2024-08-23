@@ -1,0 +1,296 @@
+(* 
+Formal Verification of Confidentiality in Secure Aggregation protocol (honest-but-curious model)
+
+This document is modeled for this special case: 
+    - Initially there are 4 clients A,B,C,D involved in the protocol
+    - No clients dropped out
+    - Secret share threshold t = 2
+
+Goal:
+    - xA, xB, xC, xD can't be obtained by attacker. (Confidentiality)
+*)
+
+free cT:channel. (* Channel for receiving secret keys for signing from trusted third party *) (* Not actually needed for modeling *)
+free cA, cB, cC, cD: channel. (* Each user has a private channel to the server *)
+
+type host. (* Type of user *)
+free A, B, C, D: host.  (* Name of users *)
+free NULL: host. (* When there are less than 4 clients, fill with NULL *)
+free xA, xB, xC, xD: bitstring [private]. (* Secret information form A, B, C and D *)
+
+(*--Generate asymmetric secret keys using security parameters--*)
+type secParam.  (* security parameters pp *)
+type skey. 
+type pkey.
+fun genSkey(secParam): skey. (* Generate private keys using security parameter *)
+fun genPkey(skey): pkey.  (* Use private key to get public key *)
+
+free pp1A, pp2A, pp1B, pp2B, pp1C, pp2C, pp1D, pp2D: secParam [private].
+
+
+(*--Secret Key Agreement--*) 
+type key. (* Symmetric Secret Key *)
+
+fun agree(skey, pkey): key. (* Actually it's Diffie-Hellman secret key exchange *)
+equation forall p1: secParam, p2: secParam; agree(genSkey(p1), genPkey(genSkey(p2))) = agree(genSkey(p2), genPkey(genSkey(p1))).
+
+(*--Symmetric encryption--*)
+fun senc(key, bitstring): bitstring. 
+reduc forall k: key, m: bitstring; sdec(k, senc(k,m)) = m.
+
+(*--Asymmetric encryption--*)
+fun aenc(pkey, bitstring): bitstring.
+reduc forall x: skey, y: bitstring; adec(x, aenc(genPkey(x), y)) = y.
+
+
+(*--Shamir Secret Sharing--*)
+
+fun secretShareB(bitstring, nat, host): bitstring. 
+(* Here I made some changes: it's hard to handle data set in proverif, and we know we have 4 users A, B, C, D by default, 
+the last argument of the function was originally a user set in the paper, here I changed it to a single user. 
+The output of this function will be the secret share for host: For example, userA calls this function, host = C, then the output is A's secret fragment for C. *)
+reduc forall str: bitstring, t: nat, u1: host, u2:host; secretRebuildB(secretShareB(str, t, u1), secretShareB(str, t, u2), t) = str.
+
+fun secretShareS(skey, nat, host): bitstring. 
+reduc forall str: skey, t: nat, u1: host, u2:host; secretRebuildS(secretShareS(str, t, u1), secretShareS(str, t, u2), t) = str.
+
+
+(*--prg--*)
+type vec. (* type vector *)
+fun prgK(key): vec. 
+fun prgB(bitstring): vec. (* Version for random element b *)
+
+(*--The input vector y generated in Round2--*)
+fun genY(bitstring, vec, vec, vec, vec): bitstring.
+reduc forall str: bitstring, b: vec, s1: vec, s2: vec, s3: vec; getX(genY(str,b,s1,s2,s3), b, s1, s2, s3) = str.
+
+(*--Summation (Server do it)--*)
+fun sum(bitstring, bitstring, bitstring, bitstring, vec, vec, vec, vec): bitstring.
+(* equation forall x1: bitstring, x2: bitstring, x3: bitstring, s1: vec, s2: vec, s3: vec, b1: vec, b2: vec, b3: vec; sum(genY(x1, b1, s1, s2), genY(x2, b2, s2, s3), genY(x3, b3, s1, s3), b1, b2, b3) = (x1, x2, x3).  *)
+
+(* When the protocol runs successfully/failed, this event is triggered *)
+event error.
+event success.
+
+query attacker(xA);
+      attacker(xB);
+      attacker(xC);
+      attacker(xD).
+
+let SecureAggregation(n: nat, t: nat) = 
+
+    (*** Round0: AdvertiseKeys ***)
+
+    (* ClientA generate key pairs and send public key to the server*)
+    let cskA = genSkey(pp1A) in let cpkA = genPkey(cskA) in
+    let sskA = genSkey(pp2A) in let spkA = genPkey(sskA) in
+    out(cA, (cpkA, spkA)); 
+    (* ClientB generate key pairs and send public key to the server*)
+    let cskB = genSkey(pp1B) in let cpkB = genPkey(cskB) in
+    let sskB = genSkey(pp2B) in let spkB = genPkey(sskB) in
+    out(cB, (cpkB, spkB)); 
+    (* ClientC generate key pairs and send public key to the server*)
+    let cskC = genSkey(pp1C) in let cpkC = genPkey(cskC) in
+    let sskC = genSkey(pp2C) in let spkC = genPkey(sskC) in
+    out(cC, (cpkC, spkC)); 
+    (* ClientD generate key pairs and send public key to the server*)
+    let cskD = genSkey(pp1D) in let cpkD = genPkey(cskD) in
+    let sskD = genSkey(pp2D) in let spkD = genPkey(sskD) in
+    out(cD, (cpkD, spkD)); 
+    (* Server collect public keys and broadcast all public keys to all users *)
+    in(cA, (cpk_A: pkey, spk_A: pkey));
+    in(cB, (cpk_B: pkey, spk_B: pkey));
+    in(cC, (cpk_C: pkey, spk_C: pkey));
+    in(cD, (cpk_D: pkey, spk_D: pkey));
+    out(cA, (A, cpk_A, spk_A, B, cpk_B, spk_B, C, cpk_C, spk_C, D, cpk_D, spk_D));
+    out(cB, (A, cpk_A, spk_A, B, cpk_B, spk_B, C, cpk_C, spk_C, D, cpk_D, spk_D));
+    out(cC, (A, cpk_A, spk_A, B, cpk_B, spk_B, C, cpk_C, spk_C, D, cpk_D, spk_D));
+    out(cD, (A, cpk_A, spk_A, B, cpk_B, spk_B, C, cpk_C, spk_C, D, cpk_D, spk_D));
+
+    (*** Round1: ShareKeys ***)
+
+    (* ClientA Receive the public key pairs sent by server *)
+    in(cA, (=A, =cpkA, =spkA, =B, rA_cpkB: pkey, rA_spkB: pkey, =C, rA_cpkC: pkey, rA_spkC: pkey, =D, rA_cpkD: pkey, rA_spkD: pkey));
+    (* ClientA generate random element b *)
+    new bA: bitstring;
+    (* ClientA generate secret shares, encrypt them and send the ciphertext to server  *)
+    let sskAShareForA = secretShareS(sskA, t, A) in let sskAShareForB = secretShareS(sskA, t, B) in let sskAShareForC = secretShareS(sskA, t, C) in let sskAShareForD = secretShareS(sskA, t, D) in
+    let bAshareForA = secretShareB(bA, t, A) in let bAshareForB = secretShareB(bA, t, B) in let bAshareForC = secretShareB(bA, t, C) in let bAshareForD = secretShareB(bA, t, D) in
+    let eAB = senc(agree(cskA, rA_cpkB), (A,B,sskAShareForB, bAshareForB)) in
+    let eAC = senc(agree(cskA, rA_cpkC), (A,C,sskAShareForC, bAshareForC)) in
+    let eAD = senc(agree(cskA, rA_cpkD), (A,D,sskAShareForD, bAshareForD)) in
+    out(cA, (eAB, eAC, eAD));
+    (* ClientB Receive the public key pairs sent by server *)
+    in(cB, (=A, rB_cpkA: pkey, rB_spkA: pkey, =B, =cpkB, =spkB, =C, rB_cpkC: pkey, rB_spkC: pkey, =D, rB_cpkD: pkey, rB_spkD: pkey));
+    (* ClientB generate random element b *)
+    new bB: bitstring;
+    (* ClientB generate secret shares, encrypt them and send the ciphertext to server  *)
+    let sskBShareForA = secretShareS(sskB, t, A) in let sskBShareForB = secretShareS(sskB, t, B) in let sskBShareForC = secretShareS(sskB, t, C) in let sskBShareForD = secretShareS(sskB, t, D) in
+    let bBshareForA = secretShareB(bB, t, A) in let bBshareForB = secretShareB(bB, t, B) in let bBshareForC = secretShareB(bB, t, C) in let bBshareForD = secretShareB(bB, t, D) in
+    let eBA = senc(agree(cskB, rB_cpkA), (B,A,sskBShareForA, bBshareForA)) in
+    let eBC = senc(agree(cskB, rB_cpkC), (B,C,sskBShareForC, bBshareForC)) in
+    let eBD = senc(agree(cskB, rB_cpkD), (B,D,sskBShareForD, bBshareForD)) in
+    out(cB, (eBA, eBC, eBD));
+    (* ClientC Receive the public key pairs sent by server *)
+    in(cC, (=A, rC_cpkA: pkey, rC_spkA: pkey, =B, rC_cpkB:pkey, rC_spkB: pkey, =C, =cpkC, =spkC, =D, rC_cpkD: pkey, rC_spkD: pkey));
+    (* ClientC generate random element b *)
+    new bC: bitstring;
+    (* ClientC generate secret shares, encrypt them and send the ciphertext to server  *)
+    let sskCShareForA = secretShareS(sskC, t, A) in let sskCShareForB = secretShareS(sskC, t, B) in let sskCShareForC = secretShareS(sskC, t, C) in let sskCShareForD = secretShareS(sskC, t, D) in
+    let bCshareForA = secretShareB(bC, t, A) in let bCshareForB = secretShareB(bC, t, B) in let bCshareForC = secretShareB(bC, t, C) in let bCshareForD = secretShareB(bC, t, D) in
+    let eCA = senc(agree(cskC, rC_cpkA), (C,A,sskCShareForA, bCshareForA)) in
+    let eCB = senc(agree(cskC, rC_cpkB), (C,B,sskCShareForB, bCshareForB)) in
+    let eCD = senc(agree(cskC, rC_cpkD), (C,D,sskCShareForD, bCshareForD)) in
+    out(cC, (eCA, eCB, eCD));
+    (* ClientD Receive the public key pairs sent by server *)
+    in(cD, (=A, rD_cpkA: pkey, rD_spkA: pkey, =B, rD_cpkB:pkey, rD_spkB: pkey, =C, rD_cpkC: pkey, rD_spkC: pkey, =D, =cpkD, =spkD));
+    (* ClientD generate random element b *)
+    new bD: bitstring;
+    (* ClientD generate secret shares, encrypt them and send the ciohertext to server  *)
+    let sskDShareForA = secretShareS(sskD, t, A) in let sskDShareForB = secretShareS(sskD, t, B) in let sskDShareForC = secretShareS(sskD, t, C) in let sskDShareForD = secretShareS(sskD, t, D) in
+    let bDshareForA = secretShareB(bD, t, A) in let bDshareForB = secretShareB(bD, t, B) in let bDshareForC = secretShareB(bD, t, C) in let bDshareForD = secretShareB(bD, t, D) in
+    let eDA = senc(agree(cskD, rD_cpkA), (D,A,sskDShareForA, bDshareForA)) in
+    let eDB = senc(agree(cskD, rD_cpkB), (D,B,sskDShareForB, bDshareForB)) in
+    let eDC = senc(agree(cskD, rD_cpkC), (D,C,sskDShareForC, bDshareForC)) in
+    out(cD, (eDA, eDB, eDC));
+    (* Server collect list of ciphertexts from A, B, C and D *)
+    in(cA, (e_AB: bitstring, e_AC: bitstring, e_AD: bitstring));
+    in(cB, (e_BA: bitstring, e_BC: bitstring, e_BD: bitstring));
+    in(cC, (e_CA: bitstring, e_CB: bitstring, e_CD: bitstring));
+    in(cD, (e_DA: bitstring, e_DB: bitstring, e_DC: bitstring));
+    (* Server send to each user ciphertext encrypted for it *)
+    out(cA, (e_BA, e_CA, e_DA));
+    out(cB, (e_AB, e_CB, e_DB));
+    out(cC, (e_AC, e_BC, e_DC));
+    out(cD, (e_AD, e_BD, e_CD));
+
+    (*** Round2: MaskedInputCollection ***)
+
+    (* ClientA receive the ciphertext *)
+    in(cA, (r_eBA: bitstring, r_eCA: bitstring, r_eDA: bitstring));
+    (* ClientA use sAB/sAC/sAD to generate pAB/pAC/pAD, use bA to generate pA *)
+    let sAB = agree(sskA, rA_spkB) in let pAB = prgK(sAB) in
+    let sAC = agree(sskA, rA_spkC) in let pAC = prgK(sAC) in
+    let sAD = agree(sskA, rA_spkD) in let pAD = prgK(sAD) in
+    let pA = prgB(bA) in
+    (* ClientA calculate the masked input vector and send it to the server *)
+    let yA = genY(xA, pA, pAB, pAC, pAD) in
+    out(cA, yA);
+    (* ClientB receive the ciphertext *)
+    in(cB, (r_eAB: bitstring, r_eCB: bitstring, r_eDB: bitstring));
+    (* ClientB use sBA/sBC/sBD to generate pBA/pBC/pBD, use bB to generate pB *)
+    let sBA = agree(sskB, rB_spkA) in let pBA = prgK(sBA) in
+    let sBC = agree(sskB, rB_spkC) in let pBC = prgK(sBC) in
+    let sBD = agree(sskB, rB_spkD) in let pBD = prgK(sBD) in
+    let pB = prgB(bB) in
+    (* ClientB calculate the masked input vector and send it to the server *)
+    let yB = genY(xB, pB, pBA, pBC, pBD) in
+    out(cB, yB);
+    (* ClientC receive the ciphertext *)
+    in(cC, (r_eAC: bitstring, r_eBC: bitstring, r_eDC: bitstring));
+    (* ClientC use sCA/sCB/sCD to generate pCA/pCB/pCD, use bC to generate pC *)
+    let sCA = agree(sskC, rC_spkA) in let pCA = prgK(sCA) in
+    let sCB = agree(sskC, rC_spkB) in let pCB = prgK(sCB) in
+    let sCD = agree(sskC, rC_spkD) in let pCD = prgK(sCD) in 
+    let pC = prgB(bC) in
+    (* ClientC calculate the masked input vector and send it to the server *)
+    let yC = genY(xC, pC, pCA, pCB, pCD) in
+    out(cC, yC);
+    (* ClientD receive the ciphertext *)
+    in(cD, (r_eAD: bitstring, r_eBD: bitstring, r_eCD: bitstring));
+    (* ClientD use sDA/sDB/sDC to generate pDA/pDB/pDC, use bD to generate pD *)
+    let sDA = agree(sskD, rD_spkA) in let pDA = prgK(sDA) in
+    let sDB = agree(sskD, rD_spkB) in let pDB = prgK(sDB) in
+    let sDC = agree(sskD, rD_spkC) in let pDC = prgK(sDC) in 
+    let pD = prgB(bD) in
+    (* ClientD calculate the masked input vector and send it to the server *)
+    let yD = genY(xD, pD, pDA, pDB, pDC) in
+    out(cD, yD);
+    (* Server collect yA, yB, yC and yD, then send the list of active users to A, B, C and D *)
+    in(cA, y_A: bitstring);
+    in(cB, y_B: bitstring);
+    in(cC, y_C: bitstring);
+    in(cD, y_D: bitstring);
+    out(cA, (A, B, C, D));
+    out(cB, (A, B, C, D));
+    out(cC, (A, B, C, D));
+    out(cD, (A, B, C, D));
+
+    (*** Round4: Unmasking ***)
+
+    (* ClientA receive a list of active users from server *)
+    in(cA, (=A, rA_B: host, rA_C: host, rA_D: host));
+    (* ClientA decrypt e to get the share of ssk and b *)
+    let (=B, =A, r_sskBShareForA: bitstring, r_bBshareForA: bitstring) = sdec(agree(cskA, rA_cpkB), r_eBA) in
+    let (=C, =A, r_sskCShareForA: bitstring, r_bCshareForA: bitstring) = sdec(agree(cskA, rA_cpkC), r_eCA) in
+    let (=D, =A, r_sskDShareForA: bitstring, r_bDshareForA: bitstring) = sdec(agree(cskA, rA_cpkD), r_eDA) in
+    (* Because no one dropped out, send shares of b to server *)
+    if(rA_B = B && rA_C = C && rA_D = D) then out(cA, (A, bAshareForA, B, r_bBshareForA, C, r_bCshareForA, D, r_bDshareForA));
+    if(rA_B = NULL && rA_C = C && rA_D = D) then out(cA, (A, bAshareForA, B, r_sskBShareForA, C, r_bCshareForA, D, r_bDshareForA));
+    if(rA_B = B && rA_C = NULL && rA_D = D) then out(cA, (A, bAshareForA, B, r_bBshareForA, C, r_sskCShareForA, D, r_bDshareForA));
+    if(rA_B = B && rA_C = C && rA_D = NULL) then out(cA, (A, bAshareForA, B, r_bBshareForA, C, r_bCshareForA, D, r_sskDShareForA));
+    if(rA_B = NULL && rA_C = NULL && rA_D = D) then out(cA, (A, bAshareForA, B, r_sskBShareForA, C, r_sskCShareForA, D, r_bDshareForA));
+    if(rA_B = NULL && rA_C = C && rA_D = NULL) then out(cA, (A, bAshareForA, B, r_sskBShareForA, C, r_bCshareForA, D, r_sskDShareForA));
+    if(rA_B = B && rA_C = NULL && rA_D = NULL) then out(cA, (A, bAshareForA, B, r_bBshareForA, C, r_sskCShareForA, D, r_sskDShareForA));
+    (* ClientB receive a list of active users from server *)
+    in(cB, (rB_A: host, =B, rB_C: host, rB_D: host));
+    (* ClientB decrypt e to get the share of ssk and b *) 
+    let (=A, =B, r_sskAShareForB: bitstring, r_bAshareForB: bitstring) = sdec(agree(cskB, rB_cpkA), r_eAB) in
+    let (=C, =B, r_sskCShareForB: bitstring, r_bCshareForB: bitstring) = sdec(agree(cskB, rB_cpkC), r_eCB) in
+    let (=D, =B, r_sskDShareForB: bitstring, r_bDshareForB: bitstring) = sdec(agree(cskB, rB_cpkD), r_eDB) in
+    (* Because no one dropped out, send shares of b to server *)
+    if(rB_A = A && rB_C = C && rB_D = D) then out(cB, (A, r_bAshareForB, B, bBshareForB, C, r_bCshareForB, D, r_bDshareForB));
+    if(rB_A = NULL && rB_C = C && rB_D = D) then out(cB, (A, r_sskAShareForB, B, bBshareForB, C, r_bCshareForB, D, r_bDshareForB));
+    if(rB_A = A && rB_C = NULL && rB_D = D) then out(cB, (A, r_bAshareForB, B, bBshareForB, C, r_sskCShareForB, D, r_bDshareForB));
+    if(rB_A = A && rB_C = C && rB_D = NULL) then out(cB, (A, r_bAshareForB, B, bBshareForB, C, r_bCshareForB, D, r_sskDShareForB));
+    if(rB_A = NULL && rB_C = NULL && rB_D = D) then out(cB, (A, r_sskAShareForB, B, bBshareForB, C, r_sskCShareForB, D, r_bDshareForB));
+    if(rB_A = NULL && rB_C = C && rB_D = NULL) then out(cB, (A, r_sskAShareForB, B, bBshareForB, C, r_bCshareForB, D, r_sskDShareForB));
+    if(rB_A = A && rB_C = NULL && rB_D = NULL) then out(cB, (A, r_bAshareForB, B, bBshareForB, C, r_sskCShareForB, D, r_sskDShareForB));
+    (* ClientC receive a list of active users from server *)
+    in(cC, (rC_A: host, rC_B: host, =C, rC_D: host));
+    (* ClientC decrypt e to get the share of ssk and b *) 
+    let (=A, =C, r_sskAShareForC: bitstring, r_bAshareForC: bitstring) = sdec(agree(cskC, rC_cpkA), r_eAC) in
+    let (=B, =C, r_sskBShareForC: bitstring, r_bBshareForC: bitstring) = sdec(agree(cskC, rC_cpkB), r_eBC) in
+    let (=D, =C, r_sskDShareForC: bitstring, r_bDshareForC: bitstring) = sdec(agree(cskC, rC_cpkD), r_eDC) in
+    (* Because no one dropped out, send shares of b to server *)
+    if(rC_A = A && rC_B = B && rC_D = D) then out(cC, (A, r_bAshareForC, B, r_bBshareForC, C, bCshareForC, D, r_bDshareForC));
+    if(rC_A = NULL && rC_B = B && rC_D = D) then out(cC, (A, r_sskAShareForC, B, r_bBshareForC, C, bCshareForC, D, r_bDshareForC));
+    if(rC_A = A && rC_B = NULL && rC_D = D) then out(cC, (A, r_bAshareForC, B, r_sskBShareForC, C, bCshareForC, D, r_bDshareForC));
+    if(rC_A = A && rC_B = B && rC_D = NULL) then out(cC, (A, r_bAshareForC, B, r_bBshareForC, C, bCshareForC, D, r_sskDShareForC));
+    if(rC_A = NULL && rC_B = NULL && rC_D = D) then out(cC, (A, r_sskAShareForC, B, r_sskBShareForC, C, bCshareForC, D, r_bDshareForC));
+    if(rC_A = NULL && rC_B = B && rC_D = NULL) then out(cC, (A, r_sskAShareForC, B, r_bBshareForC, C, bCshareForC, D, r_sskDShareForC));
+    if(rC_A = A && rC_B = NULL && rC_D = NULL) then out(cC, (A, r_bAshareForC, B, r_sskBShareForC, C, bCshareForC, D, r_sskDShareForC));
+    (* ClientD receive a list of active users from server *)
+    in(cD, (rD_A: host, rD_B: host, rD_C: host, =D));
+    (* ClientD decrypt e to get the share of ssk and b *) 
+    let (=A, =D, r_sskAShareForD: bitstring, r_bAshareForD: bitstring) = sdec(agree(cskD, rD_cpkA), r_eAD) in
+    let (=B, =D, r_sskBShareForD: bitstring, r_bBshareForD: bitstring) = sdec(agree(cskD, rD_cpkB), r_eBD) in
+    let (=C, =D, r_sskCShareForD: bitstring, r_bCshareForD: bitstring) = sdec(agree(cskD, rD_cpkC), r_eCD) in
+    (* Because no one dropped out, send shares of b to server *)
+    if(rD_A = A && rD_B = B && rD_C = C) then out(cD, (A, r_bAshareForD, B, r_bBshareForD, C, r_bCshareForD, D, bDshareForD));
+    if(rD_A = NULL && rD_B = B && rD_C = C) then out(cD, (A, r_sskAShareForD, B, r_bBshareForD, C, r_bCshareForD, D, bDshareForD));
+    if(rD_A = A && rD_B = NULL && rD_C = C) then out(cD, (A, r_bAshareForD, B, r_sskBShareForD, C, r_bCshareForD, D, bDshareForD));
+    if(rD_A = A && rD_B = B && rD_C = NULL) then out(cD, (A, r_bAshareForD, B, r_bBshareForD, C, r_sskCShareForD, D, bDshareForD));
+    if(rD_A = NULL && rD_B = NULL && rD_C = C) then out(cD, (A, r_sskAShareForD, B, r_sskBShareForD, C, r_bCshareForD, D, bDshareForD));
+    if(rD_A = NULL && rD_B = B && rD_C = NULL) then out(cD, (A, r_sskAShareForD, B, r_bBshareForD, C, r_sskCShareForD, D, bDshareForD));
+    if(rD_A = A && rD_B = NULL && rD_C = NULL) then out(cD, (A, r_bAshareForD, B, r_sskBShareForD, C, r_sskCShareForD, D, bDshareForD));
+    (* Server receive shares and calculate the sum *)
+    in(cA, (=A, bA_shareForA: bitstring, =B, bB_shareForA: bitstring, =C, bC_shareForA: bitstring, =D, bD_shareForA: bitstring));
+    in(cB, (=A, bA_shareForB: bitstring, =B, bB_shareForB: bitstring, =C, bC_shareForB: bitstring, =D, bD_shareForB: bitstring));
+    in(cC, (=A, bA_shareForC: bitstring, =B, bB_shareForC: bitstring, =C, bC_shareForC: bitstring, =D, bD_shareForC: bitstring));
+    in(cD, (=A, bA_shareForD: bitstring, =B, bB_shareForD: bitstring, =C, bC_shareForD: bitstring, =D, bD_shareForD: bitstring));
+    let b_A = secretRebuildB(bA_shareForB, bA_shareForC, t) in
+    let p_A = prgB(b_A) in
+    let b_B = secretRebuildB(bB_shareForB, bB_shareForC, t) in
+    let p_B = prgB(b_B) in
+    let b_C = secretRebuildB(bC_shareForB, bC_shareForC, t) in
+    let p_C = prgB(b_C) in 
+    let b_D = secretRebuildB(bD_shareForB, bD_shareForC, t) in
+    let p_D = prgB(b_D) in 
+    let z = sum(y_A, y_B, y_C, y_D, p_A, p_B, p_C, p_D) in
+    event success.
+
+
+process
+
+    SecureAggregation(4,2)
